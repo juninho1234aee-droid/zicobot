@@ -1,4 +1,3 @@
-import random
 import logging
 import requests
 from datetime import datetime, timedelta
@@ -10,623 +9,454 @@ BOT_TOKEN  = "8255241467:AAGX5ncD95g06Bg7TF32VY8PKIh6BhsYJ3c"
 ADMIN_ID   = 1590570666
 UZ         = ZoneInfo("Asia/Tashkent")
 WEBAPP_URL = "https://zicoworldliga.netlify.app"
-BAN_HOURS  = 24
-CONFIRM_MIN = 30
+WIN_PTS=15; LOSS_PTS=10; DRAW_PTS=5; BAN_DAYS=3; CONFIRM_MIN=5
  
-# Ball tizimi
-WIN_PTS   = 15
-DRAW_PTS  = 5
-LOSS_PTS  = 20   # ayiriladi
-TOP3_WIN  = 30   # top3 ni yutsa
-TOP3_LOSS = 25   # top3 yutqizsa ayiriladi
+SB="https://wfpspsiikwdxmatavwwm.supabase.co"
+SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmcHNwc2lpa3dkeG1hdGF2d3dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MjYwMTcsImV4cCI6MjA5ODQwMjAxN30.a48U3deN-0Kjg3FC4Edy-m3Z71ru-LyHuohkFwkEyfw"
+H={"apikey":SK,"Authorization":f"Bearer {SK}","Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=representation"}
  
-# Mavsum
-SEASON_NUM   = 1
-SEASON_START = datetime(2026, 7, 7, 7, 0, 0, tzinfo=ZoneInfo("Asia/Tashkent"))
-SEASON_END   = datetime(2026, 8, 7, 7, 0, 0, tzinfo=ZoneInfo("Asia/Tashkent"))
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s",level=logging.INFO)
+log=logging.getLogger(__name__)
  
-SUPABASE_URL = "https://wfpspsiikwdxmatavwwm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmcHNwc2lpa3dkeG1hdGF2d3dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MjYwMTcsImV4cCI6MjA5ODQwMjAxN30.a48U3deN-0Kjg3FC4Edy-m3Z71ru-LyHuohkFwkEyfw"
+def now(): return datetime.now(UZ)
+def today(): return now().strftime("%Y-%m-%d")
+def g(t,p=""): r=requests.get(f"{SB}/rest/v1/{t}{p}",headers=H); return r.json() if r.ok else []
+def po(t,d): r=requests.post(f"{SB}/rest/v1/{t}",headers=H,json=d); return r.json() if r.ok else None
+def pa(t,d,p): return requests.patch(f"{SB}/rest/v1/{t}{p}",headers=H,json=d).ok
+def de(t,p): return requests.delete(f"{SB}/rest/v1/{t}{p}",headers=H).ok
  
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates,return=representation"
-}
- 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
- 
-# ═══════════════════════════
-# DB HELPERS
-# ═══════════════════════════
-def db_get(table, params=""):
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}{params}", headers=HEADERS)
-    return r.json() if r.ok else []
- 
-def db_post(table, data):
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-    return r.json() if r.ok else None
- 
-def db_patch(table, data, params):
-    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}{params}", headers=HEADERS, json=data)
-    return r.ok
- 
-def db_delete(table, params):
-    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}{params}", headers=HEADERS)
-    return r.ok
- 
-def now_uz():
-    return datetime.now(UZ)
- 
-def today():
-    return now_uz().strftime("%Y-%m-%d")
- 
-# ═══════════════════════════
-# USER HELPERS
-# ═══════════════════════════
-def save_user(user, photo_url=None):
-    data = {
-        "id": user.id,
-        "username": user.username or user.first_name,
-        "first_name": user.first_name or ""
-    }
-    if photo_url:
-        data["photo_url"] = photo_url
-    db_post("users", data)
- 
-def get_user(uid):
-    res = db_get("users", f"?id=eq.{uid}")
-    return res[0] if res else None
- 
-def get_top3_ids():
-    res = db_get("users", "?order=points.desc&select=id&limit=3")
-    return [r["id"] for r in res] if res else []
- 
-def get_rank(uid):
-    all_u = db_get("users", "?order=points.desc&select=id")
-    for i, u in enumerate(all_u):
-        if u["id"] == uid:
-            return i + 1
-    return None
+def get_user(uid): r=g("users",f"?id=eq.{uid}"); return r[0] if r else None
+def save_user(user,photo=None):
+    d={"id":user.id,"username":user.username or user.first_name,"first_name":user.first_name or ""}
+    if photo: d["photo_url"]=photo
+    po("users",d)
  
 def is_banned(uid):
-    u = get_user(uid)
+    u=get_user(uid)
     if u and u.get("ban_until"):
         try:
-            ban_dt = datetime.fromisoformat(u["ban_until"].replace("Z", "+00:00"))
-            if now_uz() < ban_dt:
-                return True, ban_dt
-            db_patch("users", {"ban_until": None}, f"?id=eq.{uid}")
-        except:
-            pass
-    return False, None
+            bd=datetime.fromisoformat(u["ban_until"].replace("Z","+00:00"))
+            if now()<bd: return True,bd
+            pa("users",{"ban_until":None},f"?id=eq.{uid}")
+        except: pass
+    return False,None
+ 
+def is_maintenance():
+    r=g("maintenance","?id=eq.1"); return r[0]["active"] if r else False
+ 
+def get_season():
+    r=g("seasons","?order=id.desc&limit=1"); return r[0] if r else {"id":1,"status":"active"}
  
 def get_my_match(uid):
-    res = db_get("matches", f"?or=(player1_id.eq.{uid},player2_id.eq.{uid})&status=neq.done&order=id.desc&limit=1")
-    if not res:
-        return None
-    m = res[0]
-    p1 = get_user(m["player1_id"])
-    p2 = get_user(m["player2_id"])
-    m["p1_name"] = p1["username"] if p1 else "?"
-    m["p2_name"] = p2["username"] if p2 else "?"
-    m["p1_photo"] = p1.get("photo_url") if p1 else None
-    m["p2_photo"] = p2.get("photo_url") if p2 else None
+    r=g("matches",f"?or=(player1_id.eq.{uid},player2_id.eq.{uid})&status=neq.done&order=id.desc&limit=1")
+    if not r: return None
+    m=r[0]; p1=get_user(m["player1_id"]); p2=get_user(m["player2_id"])
+    m["p1n"]=p1["username"] if p1 else "?"; m["p2n"]=p2["username"] if p2 else "?"
     return m
  
-# ═══════════════════════════
-# NAVBAT (QUEUE)
-# ═══════════════════════════
-def get_queue():
-    return db_get("queue", "?select=*&order=created_at.asc")
+def is_registered(uid,snum):
+    r=g("registrations",f"?user_id=eq.{uid}&season_num=eq.{snum}"); return len(r)>0
  
-def in_queue(uid):
-    res = db_get("queue", f"?user_id=eq.{uid}")
-    return len(res) > 0
+SEASON_START_DT = datetime(2026, 7, 3, 7, 0, 0, tzinfo=ZoneInfo("Asia/Tashkent"))
  
-def add_to_queue(uid):
-    db_post("queue", {"user_id": uid, "created_at": now_uz().isoformat()})
+def season_start_text():
+    return "🗓️ <b>1-mavsum 03.07.2026 soat 07:00 da ishlaydi!</b>"
  
-def remove_from_queue(uid):
-    db_delete("queue", f"?user_id=eq.{uid}")
+async def broadcast_to_all(bot, text, kb=None):
+    """Barcha foydalanuvchilarga xabar yuborish"""
+    users=g("users","?select=id")
+    for u in users:
+        try: await bot.send_message(u["id"],text,parse_mode="HTML",reply_markup=kb)
+        except: pass
  
-# ═══════════════════════════
-# MAVSUM
-# ═══════════════════════════
-def get_season_status():
-    n = now_uz()
-    if n < SEASON_START:
-        diff = int((SEASON_START - n).total_seconds())
-        h = diff // 3600
-        m = (diff % 3600) // 60
-        return "waiting", f"{h}:{m:02d}"
-    elif n < SEASON_END:
-        diff = int((SEASON_END - n).total_seconds())
-        d = diff // 86400
-        return "active", f"{d} kun"
-    else:
-        return "ended", None
- 
-# ═══════════════════════════
-# /start
-# ═══════════════════════════
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
- 
-    # Profil rasmini olish
+async def cmd_start(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
+    user=update.effective_user
     try:
-        photos = await ctx.bot.get_user_profile_photos(user.id, limit=1)
-        photo_url = None
-        if photos.total_count > 0:
-            file = await ctx.bot.get_file(photos.photos[0][-1].file_id)
-            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-        save_user(user, photo_url)
-    except:
-        save_user(user)
+        photos=await ctx.bot.get_user_profile_photos(user.id,limit=1)
+        photo=None
+        if photos.total_count>0:
+            f=await ctx.bot.get_file(photos.photos[0][-1].file_id)
+            photo=f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f.file_path}"
+        save_user(user,photo)
+    except: save_user(user)
  
-    status, info = get_season_status()
-    banned, ban_dt = is_banned(user.id)
- 
-    if banned:
-        text = (f"👋 <b>Salom, {user.first_name}!</b>\n\n"
-                f"🚫 Siz {ban_dt.strftime('%d.%m %H:%M')} gacha bansiz.")
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🏆 Ilovani ochish", web_app=WebAppInfo(url=WEBAPP_URL))
-        ]])
-        if update.message:
-            await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
-        return
- 
-    if status == "waiting":
-        season_text = f"⏳ <b>1-mavsum</b> {info} da boshlanadi\n📅 Boshlanish: 7-iyul 07:00"
-    elif status == "active":
-        season_text = f"🟢 <b>1-mavsum</b> faol — {info} qoldi"
-    else:
-        season_text = f"🏁 <b>1-mavsum</b> tugadi"
- 
-    m = get_my_match(user.id)
-    match_text = ""
-    if m:
-        rival = m["p2_name"] if user.id == m["player1_id"] else m["p1_name"]
-        match_text = f"\n\n⚔️ <b>Joriy o'yin:</b> @{rival} bilan"
- 
-    text = (f"👋 <b>Salom, {user.first_name}!</b>\n\n"
-            f"🏆 <b>ZICO WORLD LIGA</b>\n"
-            f"{season_text}{match_text}\n\n"
-            f"⬇️ Ilovani oching!")
- 
-    buttons = [[InlineKeyboardButton("🏆 Ilovani ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
- 
-    if status == "active" and not m:
-        buttons.insert(0, [InlineKeyboardButton("⚡ Raqib qidirish", callback_data="find_match")])
- 
-    if m:
-        buttons.insert(0, [InlineKeyboardButton("⚽ Hisob kiritish", callback_data="enter_score")])
- 
-    if user.id == ADMIN_ID:
-        buttons.append([InlineKeyboardButton("👑 Admin panel", callback_data="admin")])
- 
-    kb = InlineKeyboardMarkup(buttons)
-    if update.message:
-        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
-    else:
-        await update.callback_query.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
- 
-# ═══════════════════════════
-# RAQIB QIDIRISH
-# ═══════════════════════════
-async def find_match_cb(q, ctx):
-    uid = q.from_user.id
-    user = q.from_user
- 
-    banned, ban_dt = is_banned(uid)
-    if banned:
-        await q.answer(f"🚫 {ban_dt.strftime('%d.%m %H:%M')} gacha bansiz!", show_alert=True)
-        return
- 
-    m = get_my_match(uid)
-    if m:
-        await q.answer("⚠️ Sizda allaqachon faol o'yin bor!", show_alert=True)
-        return
- 
-    if in_queue(uid):
-        await q.answer("⏳ Allaqachon navbatdasiz!", show_alert=True)
-        return
- 
-    queue = get_queue()
-    waiting = [x for x in queue if x["user_id"] != uid]
- 
-    if waiting:
-        rival_id = waiting[0]["user_id"]
-        remove_from_queue(rival_id)
- 
-        rival = get_user(rival_id)
-        my_user = get_user(uid)
- 
-        db_post("matches", {
-            "player1_id": uid,
-            "player2_id": rival_id,
-            "season_date": today(),
-            "season_num": SEASON_NUM,
-            "deadline": (now_uz() + timedelta(hours=24)).isoformat()
-        })
- 
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("⚽ Hisob kiritish", callback_data="enter_score"),
-            InlineKeyboardButton("🏆 Ilova", web_app=WebAppInfo(url=WEBAPP_URL))
-        ]])
- 
-        msg = (f"⚔️ <b>RAQIB TOPILDI!</b>\n\n"
-               f"👤 @{my_user['username'] if my_user else user.first_name}\n"
-               f"          🆚\n"
-               f"👤 @{rival['username'] if rival else '?'}\n\n"
-               f"⏱ 30 daqiqa ichida hisob kiriting!\n"
-               f"⚠️ Kiritmasa — {BAN_HOURS} soat ban!")
- 
-        try:
-            await ctx.bot.send_message(rival_id, msg, parse_mode="HTML", reply_markup=kb)
-        except Exception as e:
-            logger.error(e)
- 
-        await q.message.edit_text(msg, parse_mode="HTML", reply_markup=kb)
- 
-    else:
-        add_to_queue(uid)
-        await q.message.edit_text(
-            f"⏳ <b>Raqib qidirilmoqda...</b>\n\n"
-            f"Navbatda kutayapsiz. Raqib topilsa darhol xabar beramiz!\n\n"
-            f"Bekor qilish uchun /start bosing.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("❌ Navbatdan chiqish", callback_data="leave_queue")
-            ]])
-        )
- 
-# ═══════════════════════════
-# HISOB KIRITISH
-# ═══════════════════════════
-async def enter_score_cb(q, ctx):
-    uid = q.from_user.id
-    m = get_my_match(uid)
-    if not m:
-        await q.answer("❗ Faol o'yin yo'q!", show_alert=True)
-        return
-    rival = m["p2_name"] if uid == m["player1_id"] else m["p1_name"]
-    await q.message.reply_text(
-        f"⚽ <b>Hisob kiritish</b>\n\n"
-        f"Raqib: <b>@{rival}</b>\n\n"
-        f"Format: <code>siz-raqib</code>\n"
-        f"Misol: <code>3-1</code>",
-        parse_mode="HTML"
-    )
-    ctx.user_data["score_match"] = True
- 
-async def process_score(update, ctx, uid, text):
-    parts = text.split("-")
-    if len(parts) != 2 or not parts[0].strip().isdigit() or not parts[1].strip().isdigit():
-        await update.message.reply_text("❗ Format: <code>3-1</code>", parse_mode="HTML")
-        ctx.user_data["score_match"] = True
-        return
- 
-    m = get_my_match(uid)
-    if not m:
-        await update.message.reply_text("❗ Faol o'yin yo'q.")
-        return
- 
-    my_g  = int(parts[0].strip())
-    opp_g = int(parts[1].strip())
-    rival_id = m["player2_id"] if uid == m["player1_id"] else m["player1_id"]
-    rival_u  = m["p2_name"]    if uid == m["player1_id"] else m["p1_name"]
-    my_u     = update.effective_user.username or update.effective_user.first_name
-    winner_id = uid if my_g > opp_g else (rival_id if opp_g > my_g else None)
- 
-    db_patch("matches", {
-        "score": text, "submitted_by": uid,
-        "winner_id": winner_id,
-        "submitted_at": now_uz().isoformat(),
-        "status": "awaiting"
-    }, f"?id=eq.{m['id']}")
- 
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Ha, to'g'ri", callback_data=f"confirm:{m['id']}"),
-        InlineKeyboardButton("❌ Xato", callback_data=f"deny:{m['id']}")
-    ]])
- 
-    try:
-        await ctx.bot.send_message(
-            rival_id,
-            f"⚽ <b>Hisob tasdiqlash!</b>\n\n"
-            f"@{my_u} yubordi: <b>{text}</b>\n\n"
-            f"To'g'rimi?\n"
-            f"⚠️ <b>{CONFIRM_MIN} daqiqa ichida tasdiqlanmasa — {BAN_HOURS} soat ban!</b>",
-            parse_mode="HTML", reply_markup=kb
-        )
-    except Exception as e:
-        logger.error(e)
- 
-    await update.message.reply_text(
-        f"✅ Hisob yuborildi: <b>{text}</b>\n@{rival_u} tasdiqlashini kuting.",
-        parse_mode="HTML"
-    )
- 
-    ctx.job_queue.run_once(
-        ban_check_job,
-        when=CONFIRM_MIN * 60,
-        data={"mid": m["id"], "rival_id": rival_id, "submitter_id": uid}
-    ) if ctx.job_queue else None
- 
-# ═══════════════════════════
-# TASDIQLASH
-# ═══════════════════════════
-async def do_confirm(q, ctx, uid, mid, action):
-    res = db_get("matches", f"?id=eq.{mid}")
-    if not res:
-        await q.message.edit_text("✅ Allaqachon tugallangan.")
-        return
-    m = res[0]
-    if m["status"] == "done":
-        await q.message.edit_text("✅ Allaqachon tugallangan.")
-        return
-    if uid == m["submitted_by"]:
-        await q.answer("❌ O'z hisobingizni tasdiqlay olmaysiz!", show_alert=True)
-        return
- 
-    p1 = get_user(m["player1_id"])
-    p2 = get_user(m["player2_id"])
-    m["p1_name"] = p1["username"] if p1 else "?"
-    m["p2_name"] = p2["username"] if p2 else "?"
- 
-    if action == "yes":
-        db_patch("matches", {"status": "done", "confirmed": 1}, f"?id=eq.{mid}")
-        top3 = get_top3_ids()
- 
-        if m["winner_id"] is None:
-            for pid in [m["player1_id"], m["player2_id"]]:
-                u = get_user(pid)
-                if u:
-                    db_patch("users", {
-                        "points": u["points"] + DRAW_PTS,
-                        "draws": u["draws"] + 1
-                    }, f"?id=eq.{pid}")
-            result = (f"🤝 <b>Durang!</b>\n"
-                     f"@{m['p1_name']} {m['score']} @{m['p2_name']}\n"
-                     f"Ikkalangiz +{DRAW_PTS} ball!")
+    # Texnik ish
+    if is_maintenance():
+        text=("🔧 <b>Texnik ishlar olib borilmoqda</b>\n\n"
+              "Iltimos <b>soat 13:00</b> yoki <b>15:30</b> gacha kuting.\n\n"
+              "Rating va profil ko'rish mumkin ⬇️")
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]])
+        if update.message: await update.message.reply_text(text,parse_mode="HTML",reply_markup=kb)
         else:
-            winner_id = m["winner_id"]
-            loser_id = m["player2_id"] if winner_id == m["player1_id"] else m["player1_id"]
-            wu = get_user(winner_id)
-            lu = get_user(loser_id)
- 
-            # Top 3 bonus
-            if loser_id in top3 and winner_id not in top3:
-                w_pts = TOP3_WIN
-                l_pts = TOP3_LOSS
-                bonus_text = "🔥 TOP 3 ni yutdingiz! MEGA BONUS!"
-            else:
-                w_pts = WIN_PTS
-                l_pts = LOSS_PTS
-                bonus_text = ""
- 
-            if wu:
-                db_patch("users", {
-                    "points": wu["points"] + w_pts,
-                    "wins": wu["wins"] + 1
-                }, f"?id=eq.{winner_id}")
-            if lu:
-                db_patch("users", {
-                    "points": max(0, lu["points"] - l_pts),
-                    "losses": lu["losses"] + 1
-                }, f"?id=eq.{loser_id}")
- 
-            wn = m["p1_name"] if winner_id == m["player1_id"] else m["p2_name"]
-            ln = m["p2_name"] if winner_id == m["player1_id"] else m["p1_name"]
-            result = (f"🏆 <b>Natija!</b>\n"
-                     f"@{m['p1_name']} {m['score']} @{m['p2_name']}\n\n"
-                     f"✅ @{wn} +{w_pts} ball\n"
-                     f"❌ @{ln} -{l_pts} ball\n"
-                     + (f"\n{bonus_text}" if bonus_text else ""))
- 
-        for pid in [m["player1_id"], m["player2_id"]]:
-            try:
-                await ctx.bot.send_message(pid, result, parse_mode="HTML")
-            except:
-                pass
-        await q.message.edit_text(result, parse_mode="HTML")
- 
-    else:
-        db_patch("matches", {
-            "status": "pending", "score": None,
-            "submitted_by": None, "winner_id": None
-        }, f"?id=eq.{mid}")
-        rival_id = m["player2_id"] if uid == m["player1_id"] else m["player1_id"]
-        try:
-            await ctx.bot.send_message(rival_id,
-                "❌ Hisob rad etildi. Qayta kiriting.")
-        except:
-            pass
-        await q.message.edit_text("❌ Hisob rad etildi.")
- 
-# ═══════════════════════════
-# BAN CHECK JOB
-# ═══════════════════════════
-async def ban_check_job(ctx: ContextTypes.DEFAULT_TYPE):
-    d = ctx.job.data
-    res = db_get("matches", f"?id=eq.{d['mid']}&select=status")
-    if not res or res[0]["status"] == "done":
+            try: await update.callback_query.message.edit_text(text,parse_mode="HTML",reply_markup=kb)
+            except: pass
         return
-    ban_until = (now_uz() + timedelta(hours=BAN_HOURS)).isoformat()
-    db_patch("users", {"ban_until": ban_until}, f"?id=eq.{d['rival_id']}")
+ 
+    season=get_season()
+    snum=season["id"]
+    s_status=season.get("status","active")
+ 
+    # Mavsum tugagan — admin yangi boshlagunicha
+    if s_status=="ended":
+        text=("🔧 <b>Texnik ishlar olib borilmoqda</b>\n\n"
+              "Iltimos <b>soat 13:00</b> yoki <b>15:30</b> gacha kuting.\n\n"
+              "Rating va profil ko'rish mumkin ⬇️")
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]])
+        if user.id==ADMIN_ID:
+            kb=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Yangi mavsum boshlash",callback_data="admin_new_season")],
+                [InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]
+            ])
+        if update.message: await update.message.reply_text(text,parse_mode="HTML",reply_markup=kb)
+        else:
+            try: await update.callback_query.message.edit_text(text,parse_mode="HTML",reply_markup=kb)
+            except: pass
+        return
+ 
+    banned,ban_dt=is_banned(user.id)
+    m=get_my_match(user.id)
+    registered=is_registered(user.id,snum)
+ 
+    if banned:
+        end=ban_dt.strftime('%d.%m.%Y %H:%M')
+        text=(f"👋 <b>Salom, {user.first_name}!</b>\n\n"
+              f"🚫 <b>{BAN_DAYS} kunlik ban!</b>\n📅 Tugaydi: {end}\n\n"
+              f"Rating va ilovani ko'rishingiz mumkin.")
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]])
+    else:
+        match_txt=""
+        if m:
+            rival=m["p2n"] if user.id==m["player1_id"] else m["p1n"]
+            match_txt=f"\n\n⚔️ <b>Joriy o'yin:</b> @{rival}"
+ 
+        n=now()
+        if n < SEASON_START_DT:
+            s_txt = season_start_text()
+        else:
+            s_txt = f"🟢 <b>{snum}-mavsum</b> faol"
+ 
+        text=(f"👋 <b>Salom, {user.first_name}!</b>\n\n"
+              f"🏆 <b>ZICO WORLD LIGA</b>\n"
+              f"{s_txt}{match_txt}\n\n"
+              f"⬇️ Ilovani oching!")
+ 
+        buttons=[[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]]
+        if m: buttons.insert(0,[InlineKeyboardButton("⚽ Hisob kiritish",callback_data="enter_score")])
+        if user.id==ADMIN_ID: buttons.append([InlineKeyboardButton("👑 Admin",callback_data="admin")])
+        kb=InlineKeyboardMarkup(buttons)
+ 
+    if update.message: await update.message.reply_text(text,parse_mode="HTML",reply_markup=kb)
+    else:
+        try: await update.callback_query.message.edit_text(text,parse_mode="HTML",reply_markup=kb)
+        except: pass
+ 
+async def accept_cb(q,ctx,seeker_id):
+    rival_id=q.from_user.id
+    rival=get_user(rival_id); seeker=get_user(seeker_id)
+    if not rival or not seeker: await q.answer("❌ Xato",show_alert=True); return
+    banned,ban_dt=is_banned(rival_id)
+    if banned: await q.answer(f"🚫 {ban_dt.strftime('%d.%m')} gacha bansiz!",show_alert=True); return
+    season=get_season(); snum=season["id"]
+    res=po("matches",{"player1_id":seeker_id,"player2_id":rival_id,"season_num":snum,
+        "season_date":today(),"deadline":(now()+timedelta(hours=24)).isoformat()})
+    s_name=seeker["username"]; r_name=rival["username"]
+    msg=(f"✅ <b>O'yin boshlandi!</b>\n\n"
+         f"👤 @{s_name}  🆚  👤 @{r_name}\n\n"
+         f"🎮 <b>eFootball 1vs1</b>\n\n"
+         f"📌 <b>Telegram ID lar:</b>\n"
+         f"@{s_name}: <code>{seeker_id}</code>\n"
+         f"@{r_name}: <code>{rival_id}</code>\n\n"
+         f"G'olib hisob yozadi: /hisob\n"
+         f"⚠️ <b>{CONFIRM_MIN} daqiqada tasdiqlanmasa → {BAN_DAYS} kunlik ban!</b>")
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("⚽ Hisob kiritish",callback_data="enter_score"),
+        InlineKeyboardButton("🏆 Ilova",web_app=WebAppInfo(url=WEBAPP_URL))]])
+    try: await ctx.bot.send_message(seeker_id,msg,parse_mode="HTML",reply_markup=kb)
+    except: pass
+    await q.message.edit_text(msg,parse_mode="HTML",reply_markup=kb)
+ 
+async def decline_cb(q,ctx,seeker_id):
+    rival=get_user(q.from_user.id); rn=rival["username"] if rival else "?"
+    try:
+        await ctx.bot.send_message(seeker_id,f"❌ @{rn} taklifni rad etdi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]]))
+    except: pass
+    await q.message.edit_text("❌ Taklifni rad etdingiz.")
+ 
+async def enter_score_cb(q,ctx):
+    uid=q.from_user.id; m=get_my_match(uid)
+    if not m: await q.answer("❗ Faol o'yin yo'q!",show_alert=True); return
+    rival=m["p2n"] if uid==m["player1_id"] else m["p1n"]
+    await q.message.reply_text(f"⚽ <b>Hisob kiritish</b>\nRaqib: <b>@{rival}</b>\nFormat: <code>3-1</code>",parse_mode="HTML")
+    ctx.user_data["sm"]=True
+ 
+async def cmd_hisob(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
+    uid=update.effective_user.id; m=get_my_match(uid)
+    if not m: await update.message.reply_text("❗ Faol o'yin yo'q!"); return
+    rival=m["p2n"] if uid==m["player1_id"] else m["p1n"]
+    await update.message.reply_text(f"⚽ <b>Hisob kiritish</b>\nRaqib: <b>@{rival}</b>\nFormat: <code>3-1</code>",parse_mode="HTML")
+    ctx.user_data["sm"]=True
+ 
+async def process_score(update,ctx,uid,text):
+    parts=text.split("-")
+    if len(parts)!=2 or not parts[0].strip().isdigit() or not parts[1].strip().isdigit():
+        await update.message.reply_text("❗ Format: <code>3-1</code>",parse_mode="HTML")
+        ctx.user_data["sm"]=True; return
+    m=get_my_match(uid)
+    if not m: await update.message.reply_text("❗ Faol o'yin yo'q."); return
+    if m.get("status")=="awaiting": await update.message.reply_text("⏳ Raqib tasdiqlasin."); return
+    g1,g2=int(parts[0].strip()),int(parts[1].strip())
+    rival_id=m["player2_id"] if uid==m["player1_id"] else m["player1_id"]
+    rival_u=m["p2n"] if uid==m["player1_id"] else m["p1n"]
+    my_u=update.effective_user.username or update.effective_user.first_name
+    winner_id=uid if g1>g2 else (rival_id if g2>g1 else None)
+    pa("matches",{"score":f"{g1}-{g2}","submitted_by":uid,"winner_id":winner_id,
+        "submitted_at":now().isoformat(),"status":"awaiting"},f"?id=eq.{m['id']}")
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("✅ To'g'ri",callback_data=f"confirm:{m['id']}"),
+        InlineKeyboardButton("❌ Xato",callback_data=f"deny:{m['id']}")]])
+    try:
+        await ctx.bot.send_message(rival_id,
+            f"⚽ <b>Hisob tasdiqlash!</b>\n@{my_u} yubordi: <b>{g1}-{g2}</b>\nTo'g'rimi?\n"
+            f"⚠️ <b>{CONFIRM_MIN} daqiqa ichida tasdiqlamasangiz → {BAN_DAYS} kunlik ban!</b>",
+            parse_mode="HTML",reply_markup=kb)
+    except Exception as e: log.error(e)
+    await update.message.reply_text(f"✅ Hisob yuborildi: <b>{g1}-{g2}</b>",parse_mode="HTML")
+    if ctx.job_queue:
+        ctx.job_queue.run_once(confirm_timeout,when=CONFIRM_MIN*60,
+            data={"mid":m["id"],"rival_id":rival_id,"submitter_id":uid,"rival_name":rival_u,"submitter_name":my_u})
+ 
+async def confirm_timeout(ctx):
+    d=ctx.job.data
+    r=g("matches",f"?id=eq.{d['mid']}&select=status")
+    if not r or r[0]["status"]=="done": return
+    bu=(now()+timedelta(days=BAN_DAYS)).isoformat()
+    pa("users",{"ban_until":bu},f"?id=eq.{d['rival_id']}")
+    pa("matches",{"status":"done"},f"?id=eq.{d['mid']}")
+    end=(now()+timedelta(days=BAN_DAYS)).strftime('%d.%m.%Y %H:%M')
     try:
         await ctx.bot.send_message(d["rival_id"],
-            f"🚫 <b>{BAN_HOURS} soatlik ban!</b>\n{CONFIRM_MIN} daqiqa ichida tasdiqlamadingiz.",
-            parse_mode="HTML")
+            f"🚫 <b>{BAN_DAYS} kunlik ban!</b>\n@{d['submitter_name']} hisob yozdi,\n"
+            f"siz {CONFIRM_MIN} daqiqa ichida tasdiqlamadingiz.\n📅 Ban tugaydi: {end}",parse_mode="HTML")
+    except: pass
+    try:
         await ctx.bot.send_message(d["submitter_id"],
-            "ℹ️ Raqibingiz tasdiqlamadi — ban oldi. O'yin avtomatik bekor.")
-    except:
-        pass
-    db_patch("matches", {"status": "done"}, f"?id=eq.{d['mid']}")
+            f"ℹ️ @{d['rival_name']} tasdiqlamadi → {BAN_DAYS} kunlik ban oldi.")
+    except: pass
  
-# ═══════════════════════════
-# CALLBACK
-# ═══════════════════════════
-async def callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    uid = q.from_user.id
-    await q.answer()
+async def do_confirm(q,ctx,uid,mid,action):
+    r=g("matches",f"?id=eq.{mid}")
+    if not r: await q.message.edit_text("✅ Tugallangan."); return
+    m=r[0]
+    if m["status"]=="done": await q.message.edit_text("✅ Allaqachon tugallangan."); return
+    if uid==m.get("submitted_by"): await q.answer("❌ O'z hisobingizni tasdiqlay olmaysiz!",show_alert=True); return
+    p1=get_user(m["player1_id"]); p2=get_user(m["player2_id"])
+    p1n=p1["username"] if p1 else "?"; p2n=p2["username"] if p2 else "?"
+    if action=="yes":
+        pa("matches",{"status":"done","confirmed":1},f"?id=eq.{mid}")
+        wid=m.get("winner_id")
+        if wid is None:
+            for pid in [m["player1_id"],m["player2_id"]]:
+                u=get_user(pid)
+                if u: pa("users",{"points":u["points"]+DRAW_PTS,"draws":u["draws"]+1},f"?id=eq.{pid}")
+            result=f"🤝 <b>Durang!</b>\n@{p1n} {m['score']} @{p2n}\nIkkalangiz +{DRAW_PTS} ball!"
+        else:
+            lid=m["player2_id"] if wid==m["player1_id"] else m["player1_id"]
+            wu=get_user(wid); lu=get_user(lid)
+            if wu: pa("users",{"points":wu["points"]+WIN_PTS,"wins":wu["wins"]+1},f"?id=eq.{wid}")
+            if lu: pa("users",{"points":max(0,lu["points"]-LOSS_PTS),"losses":lu["losses"]+1},f"?id=eq.{lid}")
+            wn=p1n if wid==m["player1_id"] else p2n; ln=p2n if wid==m["player1_id"] else p1n
+            result=f"🏆 <b>Natija!</b>\n@{p1n} {m['score']} @{p2n}\n✅ @{wn} +{WIN_PTS} ball\n❌ @{ln} -{LOSS_PTS} ball"
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]])
+        for pid in [m["player1_id"],m["player2_id"]]:
+            try: await ctx.bot.send_message(pid,result,parse_mode="HTML",reply_markup=kb)
+            except: pass
+        await q.message.edit_text(result,parse_mode="HTML")
+    else:
+        pa("matches",{"status":"pending","score":None,"submitted_by":None,"winner_id":None},f"?id=eq.{mid}")
+        sid=m.get("submitted_by")
+        try: await ctx.bot.send_message(sid,"❌ Hisob rad etildi. Qayta kiriting: /hisob")
+        except: pass
+        await q.message.edit_text("❌ Hisob rad etildi.")
  
-    if q.data == "home":
-        await cmd_start(update, ctx)
-    elif q.data == "find_match":
-        await find_match_cb(q, ctx)
-    elif q.data == "enter_score":
-        await enter_score_cb(q, ctx)
-    elif q.data == "leave_queue":
-        remove_from_queue(uid)
-        await q.message.edit_text("✅ Navbatdan chiqdingiz.")
-    elif q.data == "admin":
-        await show_admin(q, uid, ctx)
-    elif q.data == "admin_season_end":
-        await end_season(q, ctx)
-    elif q.data.startswith("confirm:"):
-        mid = int(q.data.split(":")[1])
-        await do_confirm(q, ctx, uid, mid, "yes")
-    elif q.data.startswith("deny:"):
-        mid = int(q.data.split(":")[1])
-        await do_confirm(q, ctx, uid, mid, "no")
- 
-# ═══════════════════════════
-# MESSAGE HANDLER
-# ═══════════════════════════
-async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    text = update.message.text.strip()
- 
-    if ctx.user_data.get("score_match"):
-        ctx.user_data.pop("score_match", None)
-        await process_score(update, ctx, uid, text)
-        return
- 
-    await update.message.reply_text(
-        "Ilovani ochish uchun /start bosing.",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🏆 Ilovani ochish", web_app=WebAppInfo(url=WEBAPP_URL))
-        ]])
-    )
- 
-# ═══════════════════════════
-# /hisob
-# ═══════════════════════════
-async def cmd_hisob(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    m = get_my_match(uid)
-    if not m:
-        await update.message.reply_text(
-            "❗ Faol o'yin yo'q. Avval raqib toping!",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⚡ Raqib qidirish", callback_data="find_match")
-            ]])
-        )
-        return
-    rival = m["p2_name"] if uid == m["player1_id"] else m["p1_name"]
-    await update.message.reply_text(
-        f"⚽ <b>Hisob kiritish</b>\n\nRaqib: <b>@{rival}</b>\n\n"
-        f"Format: <code>siz-raqib</code>\nMisol: <code>3-1</code>",
-        parse_mode="HTML"
-    )
-    ctx.user_data["score_match"] = True
- 
-# ═══════════════════════════
-# ADMIN
-# ═══════════════════════════
-async def show_admin(q, uid, ctx):
-    if uid != ADMIN_ID:
-        await q.answer("❌ Ruxsat yo'q!", show_alert=True)
-        return
-    total   = len(db_get("users", "?select=id"))
-    total_m = len(db_get("matches", "?select=id"))
-    done_m  = len(db_get("matches", "?status=eq.done&select=id"))
-    queue_n = len(db_get("queue", "?select=user_id"))
-    status, info = get_season_status()
- 
+async def show_admin(q,uid,ctx):
+    if uid!=ADMIN_ID: await q.answer("❌",show_alert=True); return
+    total=len(g("users","?select=id")); tm=len(g("matches","?select=id"))
+    dm=len(g("matches","?status=eq.done&select=id")); qn=len(g("queue","?select=user_id"))
+    season=get_season(); mn=g("maintenance","?id=eq.1")
+    mint=mn[0]["active"] if mn else False
     await q.message.edit_text(
-        f"👑 <b>ADMIN PANEL</b>\n\n"
-        f"👥 Jami a'zolar: <b>{total}</b>\n"
-        f"⚔️ Jami o'yinlar: <b>{total_m}</b>\n"
-        f"✅ Tugallangan: <b>{done_m}</b>\n"
-        f"⏳ Navbatda: <b>{queue_n}</b>\n\n"
-        f"📅 Mavsum holati: <b>{status}</b> ({info})",
+        f"👑 <b>ADMIN — {season['id']}-MAVSUM</b>\n\n"
+        f"👥 A'zolar: <b>{total}</b>\n⚔️ O'yinlar: <b>{tm}</b>\n"
+        f"✅ Tugallangan: <b>{dm}</b>\n⏳ Navbatda: <b>{qn}</b>\n"
+        f"🔧 Texnik ish: <b>{'FAOL' if mint else 'off'}</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🏁 Mavsumni tugatish", callback_data="admin_season_end")],
-            [InlineKeyboardButton("🏠 Bosh sahifa", callback_data="home")]
-        ])
-    )
+            [InlineKeyboardButton("🏁 Mavsumni yakunlash",callback_data="admin_end_season")],
+            [InlineKeyboardButton("🔧 Texnik ish ON/OFF",callback_data="admin_toggle_maint")],
+            [InlineKeyboardButton("🕵️ Shubhalilarni tekshir",callback_data="admin_check_cheats")],
+            [InlineKeyboardButton("🏠 Bosh sahifa",callback_data="home")]
+        ]))
  
-async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid != ADMIN_ID:
-        return
-    total   = len(db_get("users", "?select=id"))
-    total_m = len(db_get("matches", "?select=id"))
-    queue_n = len(db_get("queue", "?select=user_id"))
- 
+async def cmd_admin(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
+    uid=update.effective_user.id
+    if uid!=ADMIN_ID: return
+    season=get_season(); total=len(g("users","?select=id")); qn=len(g("queue","?select=user_id"))
     await update.message.reply_text(
-        f"👑 <b>ADMIN PANEL</b>\n\n"
-        f"👥 Jami: <b>{total}</b>\n"
-        f"⚔️ O'yinlar: <b>{total_m}</b>\n"
-        f"⏳ Navbatda: <b>{queue_n}</b>",
+        f"👑 <b>ADMIN — {season['id']}-MAVSUM</b>\n👥 {total} a'zo · ⏳ {qn} navbatda",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🏁 Mavsumni tugatish", callback_data="admin_season_end")
-        ]])
-    )
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏁 Mavsumni yakunlash",callback_data="admin_end_season")],
+            [InlineKeyboardButton("🔧 Texnik ish ON/OFF",callback_data="admin_toggle_maint")],
+            [InlineKeyboardButton("🕵️ Shubhalilarni tekshir",callback_data="admin_check_cheats")]
+        ]))
  
-async def end_season(q, ctx):
-    if q.from_user.id != ADMIN_ID:
-        return
-    top = db_get("users", "?order=points.desc&select=*&limit=3")
-    if not top:
-        await q.message.edit_text("❌ Foydalanuvchilar topilmadi.")
-        return
- 
-    medals = ["🥇", "🥈", "🥉"]
-    result = f"🏁 <b>1-MAVSUM TUGADI!</b>\n\n🏆 <b>G'OLIBLAR:</b>\n\n"
-    for i, u in enumerate(top[:3]):
-        result += f"{medals[i]} @{u['username']} — {u['points']} ball\n"
- 
-    users = db_get("users", "?select=id")
+async def maintenance_job(ctx):
+    """Har chorshanba 07:00 — texnik ish boshlash"""
+    pa("maintenance",{"active":True,"started_at":now().isoformat()},"?id=eq.1")
+    users=g("users","?select=id")
     for u in users:
         try:
-            await ctx.bot.send_message(u["id"], result, parse_mode="HTML")
-        except:
-            pass
+            await ctx.bot.send_message(u["id"],
+                "🔧 <b>Texnik ishlar boshlanmoqda</b>\n\n"
+                "Har haftali tekshiruv o'tkazilmoqda.\n"
+                "Iltimos <b>11:30</b> gacha kuting.",parse_mode="HTML")
+        except: pass
  
-    await q.message.edit_text(result + "\n\n✅ Barcha foydalanuvchilarga yuborildi.", parse_mode="HTML")
+async def maintenance_end_job(ctx):
+    """Har chorshanba 11:30 — texnik ish tugatish"""
+    pa("maintenance",{"active":False},"?id=eq.1")
+    # Shubhalilarni tekshirish
+    suspicious=await check_suspicious(ctx)
+    users=g("users","?select=id")
+    for u in users:
+        try:
+            await ctx.bot.send_message(u["id"],
+                "✅ <b>Texnik ishlar tugadi!</b>\n\nO'yin davom etadi. 🎮",parse_mode="HTML")
+        except: pass
  
-# ═══════════════════════════
-# POST INIT
-# ═══════════════════════════
-async def post_init(app: Application):
+async def monthly_reset_job(ctx):
+    """Har oyda bir rating reset + yangi mavsum"""
+    season=get_season(); new_snum=season["id"]+1
+    pa("seasons",{"status":"ended","ended_at":now().isoformat()},f"?id=eq.{season['id']}")
+    # Yangi mavsum avto-boshlash
+    po("seasons",{"id":new_snum,"status":"active","started_at":now().isoformat()})
+    # Reset
+    requests.patch(f"{SB}/rest/v1/users?id=gt.0",headers=H,json={"points":0,"wins":0,"draws":0,"losses":0})
+    de("queue","?id=gt.0")
+    users=g("users","?select=id")
+    top=g("users","?order=points.desc&select=*&limit=3")
+    medals=["🥇","🥈","🥉"]; result=f"🏆 <b>{season['id']}-MAVSUM TUGADI!</b>\n\n"
+    for i,u in enumerate(top[:3]): result+=f"{medals[i]} @{u['username']} — {u['points']} ball\n"
+    result+=f"\n\n🆕 <b>{new_snum}-mavsum boshlandi!</b>\nBarcha ratinglar yangilandi."
+    for u in users:
+        try: await ctx.bot.send_message(u["id"],result,parse_mode="HTML")
+        except: pass
+ 
+async def check_suspicious(ctx):
+    """Shubhali natijalarni tekshirish (10+ farqli hisoblar)"""
+    matches=g("matches","?status=eq.done&select=*&order=id.desc&limit=100")
+    suspicious=[]
+    for m in matches:
+        if m.get("score"):
+            try:
+                parts=m["score"].split("-")
+                if len(parts)==2:
+                    diff=abs(int(parts[0])-int(parts[1]))
+                    if diff>=8:
+                        p1=get_user(m["player1_id"]); p2=get_user(m["player2_id"])
+                        suspicious.append(f"⚠️ {m['score']} — @{p1['username'] if p1 else '?'} vs @{p2['username'] if p2 else '?'}")
+            except: pass
+    if suspicious:
+        msg="🕵️ <b>Shubhali natijalar:</b>\n\n"+"\n".join(suspicious[:20])
+        try: await ctx.bot.send_message(ADMIN_ID,msg,parse_mode="HTML")
+        except: pass
+    return suspicious
+ 
+async def callback(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
+    q=update.callback_query; uid=q.from_user.id; await q.answer(); d=q.data
+    if d=="home": await cmd_start(update,ctx)
+    elif d=="enter_score": await enter_score_cb(q,ctx)
+    elif d.startswith("accept:"): await accept_cb(q,ctx,int(d.split(":")[1]))
+    elif d.startswith("decline:"): await decline_cb(q,ctx,int(d.split(":")[1]))
+    elif d.startswith("confirm:"): await do_confirm(q,ctx,uid,int(d.split(":")[1]),"yes")
+    elif d.startswith("deny:"): await do_confirm(q,ctx,uid,int(d.split(":")[1]),"no")
+    elif d=="admin": await show_admin(q,uid,ctx)
+    elif d=="admin_end_season":
+        if uid!=ADMIN_ID: return
+        season=get_season()
+        pa("seasons",{"status":"ended","ended_at":now().isoformat()},f"?id=eq.{season['id']}")
+        top=g("users","?order=points.desc&select=*&limit=3")
+        medals=["🥇","🥈","🥉"]; result=f"🏁 <b>{season['id']}-MAVSUM YAKUNLANDI!</b>\n\n🏆 <b>G'OLIBLAR:</b>\n\n"
+        for i,u in enumerate(top[:3]): result+=f"{medals[i]} @{u['username']} — {u['points']} ball\n"
+        result+="\n\n🔧 Texnik ishlar boshlanmoqda...\nIltimos kuting."
+        users=g("users","?select=id")
+        for u in users:
+            try: await ctx.bot.send_message(u["id"],result,parse_mode="HTML")
+            except: pass
+        await q.message.edit_text(result+"\n\n✅ Barcha foydalanuvchilarga yuborildi.\n\n<b>Yangi mavsum boshlash uchun tugmani bosing:</b>",
+            parse_mode="HTML",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Yangi mavsum boshlash",callback_data="admin_new_season")]]))
+    elif d=="admin_new_season":
+        if uid!=ADMIN_ID: return
+        season=get_season(); new_snum=season["id"]+1
+        po("seasons",{"id":new_snum,"status":"active","started_at":now().isoformat()})
+        requests.patch(f"{SB}/rest/v1/users?id=gt.0",headers=H,json={"points":0,"wins":0,"draws":0,"losses":0})
+        de("queue","?id=gt.0")
+        users=g("users","?select=id")
+        for u in users:
+            try:
+                await ctx.bot.send_message(u["id"],
+                    f"🚀 <b>{new_snum}-MAVSUM BOSHLANDI!</b>\n\nBarcha ratinglar yangilandi.\nO'yin boshlang! 🎮",
+                    parse_mode="HTML",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]]))
+            except: pass
+        await q.message.edit_text(f"✅ {new_snum}-mavsum boshlandi!",parse_mode="HTML")
+    elif d=="admin_toggle_maint":
+        if uid!=ADMIN_ID: return
+        mn=g("maintenance","?id=eq.1"); cur=mn[0]["active"] if mn else False
+        new_val=not cur
+        pa("maintenance",{"active":new_val,"started_at":now().isoformat() if new_val else None},"?id=eq.1")
+        # Barcha foydalanuvchilarga xabar yuborish
+        if new_val:
+            msg=("🔧 <b>Texnik ishlar boshlanmoqda!</b>\n\n"
+                 "Iltimos <b>soat 13:00</b> yoki <b>15:30</b> gacha kuting.\n\n"
+                 "Rating va profil ko'rish mumkin ⬇️")
+        else:
+            msg=("✅ <b>Texnik ishlar tugadi!</b>\n\n"
+                 "O'yin davom etadi. Ilovani oching! 🎮")
+        kb_broad=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 Ilovani ochish",web_app=WebAppInfo(url=WEBAPP_URL))]])
+        users=g("users","?select=id")
+        for u2 in users:
+            try: await ctx.bot.send_message(u2["id"],msg,parse_mode="HTML",reply_markup=kb_broad)
+            except: pass
+        await q.answer(f"🔧 Texnik ish: {'ON' if new_val else 'OFF'} — Barcha foydalanuvchilarga yuborildi!",show_alert=True)
+        await show_admin(q,uid,ctx)
+    elif d=="admin_check_cheats":
+        if uid!=ADMIN_ID: return
+        susp=await check_suspicious(ctx)
+        if susp: await q.answer(f"⚠️ {len(susp)} shubhali natija topildi!",show_alert=True)
+        else: await q.answer("✅ Shubhali natija yo'q",show_alert=True)
+ 
+async def handle_message(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
+    uid=update.effective_user.id; text=update.message.text.strip()
+    if ctx.user_data.get("sm"):
+        ctx.user_data.pop("sm",None); await process_score(update,ctx,uid,text); return
+    await update.message.reply_text("Botdan foydalanish: /start",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Start",callback_data="home")]]))
+ 
+async def post_init(app:Application):
     await app.bot.set_my_commands([
-        BotCommand("start", "Botni ishga tushirish"),
-        BotCommand("hisob", "Hisob kiritish"),
-        BotCommand("admin", "Admin panel"),
-    ])
+        BotCommand("start","Bosh menyu"),BotCommand("hisob","Hisob kiritish"),BotCommand("admin","Admin")])
+    # Har chorshanba 07:00 texnik ish ON
+    app.job_queue.run_daily(maintenance_job,time=datetime.now(UZ).replace(hour=7,minute=0,second=0).timetz(),days=(2,))
+    # Har chorshanba 11:30 texnik ish OFF
+    app.job_queue.run_daily(maintenance_end_job,time=datetime.now(UZ).replace(hour=11,minute=30,second=0).timetz(),days=(2,))
  
-# ═══════════════════════════
-# MAIN
-# ═══════════════════════════
 def main():
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("hisob", cmd_hisob))
-    app.add_handler(CommandHandler("admin", cmd_admin))
+    app=Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    app.add_handler(CommandHandler("start",cmd_start))
+    app.add_handler(CommandHandler("hisob",cmd_hisob))
+    app.add_handler(CommandHandler("admin",cmd_admin))
     app.add_handler(CallbackQueryHandler(callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("✅ Zico World Liga v2 ishga tushdi!")
-    app.run_polling(allowed_updates=["message", "callback_query"])
+    app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND,handle_message))
+    log.info("✅ Zico World Liga FINAL v4 ishga tushdi!")
+    app.run_polling(allowed_updates=["message","callback_query"])
  
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
