@@ -444,10 +444,10 @@ async def handle_message(update:Update,ctx:ContextTypes.DEFAULT_TYPE):
 async def post_init(app:Application):
     await app.bot.set_my_commands([
         BotCommand("start","Bosh menyu"),BotCommand("hisob","Hisob kiritish"),BotCommand("admin","Admin")])
-    # Har chorshanba 07:00 texnik ish ON
-    app.job_queue.run_daily(maintenance_job,time=datetime.now(UZ).replace(hour=7,minute=0,second=0).timetz(),days=(2,))
-    # Har chorshanba 11:30 texnik ish OFF
-    app.job_queue.run_daily(maintenance_end_job,time=datetime.now(UZ).replace(hour=11,minute=30,second=0).timetz(),days=(2,))
+    if app.job_queue:
+        from datetime import time as dtime
+        app.job_queue.run_daily(maintenance_job,time=dtime(hour=7,minute=0,second=0,tzinfo=UZ),days=(2,))
+        app.job_queue.run_daily(maintenance_end_job,time=dtime(hour=11,minute=30,second=0,tzinfo=UZ),days=(2,))
  
 def main():
     app=Application.builder().token(BOT_TOKEN).post_init(post_init).build()
